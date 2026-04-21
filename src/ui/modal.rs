@@ -4,6 +4,7 @@
 //!   1. Compute a centered Rect over the full terminal area.
 //!   2. Render `Clear` to erase whatever was drawn underneath.
 //!   3. Draw the dialog box on top.
+//!
 //! Because modals are rendered last in ui/mod.rs, they always appear above
 //! the tree and preview panels.
 
