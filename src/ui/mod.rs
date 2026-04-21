@@ -19,10 +19,10 @@ use crate::app::{AppMode, AppState};
 pub fn render(f: &mut Frame, state: &AppState) {
     let area = f.area();
 
-    // Reserve one row at the bottom for the hints/search bar.
+    let bottom_height = if state.mode == AppMode::Search { 3 } else { 1 };
     let [main_area, bottom_area] = Layout::vertical([
         Constraint::Min(0),
-        Constraint::Length(1),
+        Constraint::Length(bottom_height),
     ])
     .areas(area);
 
