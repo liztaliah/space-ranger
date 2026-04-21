@@ -66,6 +66,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
     let mut state = AppState::new(root)?;
 
     loop {
+        state.poll_preview(Duration::from_millis(150));
+        state.poll_preview_result();
         // Check whether the background search-cache thread has finished.
         // This is non-blocking (try_recv) so it never stalls the render loop.
         state.poll_search_cache();

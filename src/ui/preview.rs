@@ -34,6 +34,13 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
                 .alignment(Alignment::Center);
             f.render_widget(hint, area);
         }
+        PreviewContent::Loading => {
+            let hint = Paragraph::new("Loading…")
+                .block(block)
+                .style(Style::default().fg(theme::MUTED))
+                .alignment(Alignment::Center);
+            f.render_widget(hint, area);
+        }
         PreviewContent::Error(msg) => {
             let para = Paragraph::new(msg.as_str())
                 .block(block)

@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::text::Line;
@@ -51,8 +53,11 @@ pub struct DirEntry {
 }
 
 /// What the preview panel is currently showing.
+#[derive(Clone)]
 pub enum PreviewContent {
     Empty,
+    /// Background thread is loading/highlighting the file.
+    Loading,
     Error(String),
     /// Pre-rendered syntax-highlighted lines. Stored as owned Spans ('static)
     /// so rendering is zero-cost — highlighting only runs on file selection.
@@ -76,9 +81,8 @@ pub struct AppState {
     pub search_query: String,
     pub delete_target: Option<PathBuf>,
     pub terminal_size: (u16, u16),
-    /// None until the first file is previewed — syntect takes ~300ms to init,
-    /// so we defer it to avoid blocking startup.
-    pub highlighter: Option<Highlighter>,
+    /// Shared with background preview threads — initialized on first preview.
+    pub highlighter: Option<Arc<Mutex<Highlighter>>>,
     pub should_quit: bool,
     pub focus: Focus,
     /// True while the background search-cache walk is still running.
@@ -87,6 +91,13 @@ pub struct AppState {
     search_cache: Vec<CacheEntry>,
     /// Receives the completed cache from the background thread.
     search_rx: Option<Receiver<SearchResult>>,
+    /// File to preview once the debounce delay has elapsed.
+    preview_pending_path: Option<PathBuf>,
+    preview_pending_since: Option<Instant>,
+    /// Receives the result of the in-flight background preview load.
+    preview_result_rx: Option<Receiver<(PathBuf, PreviewContent)>>,
+    /// Recently rendered previews keyed by path — avoids re-reading disk on revisit.
+    preview_cache: Vec<(PathBuf, PreviewContent)>,
 }
 
 impl AppState {
@@ -109,6 +120,10 @@ impl AppState {
             search_loading: false,
             search_cache: Vec::new(),
             search_rx: None,
+            preview_pending_path: None,
+            preview_pending_since: None,
+            preview_result_rx: None,
+            preview_cache: Vec::new(),
         };
         state.load_entries();
         Ok(state)
@@ -222,7 +237,10 @@ impl AppState {
             AppAction::ToggleFocus => {
                 if self.focus == Focus::Preview {
                     self.focus = Focus::Tree;
-                } else if !matches!(self.preview_content, PreviewContent::Empty) {
+                } else if !matches!(
+                    self.preview_content,
+                    PreviewContent::Empty | PreviewContent::Loading
+                ) {
                     // Only allow focusing the preview when there's something to read.
                     self.focus = Focus::Preview;
                 }
@@ -256,6 +274,39 @@ impl AppState {
             AppAction::NoOp => {}
         }
         Ok(())
+    }
+
+    /// Called every frame. Fires `load_preview` once the cursor has been still
+    /// for `delay` — avoids blocking the event loop while scrolling past files.
+    pub fn poll_preview(&mut self, delay: Duration) {
+        let ready = self
+            .preview_pending_since
+            .map(|since| since.elapsed() >= delay)
+            .unwrap_or(false);
+
+        if ready {
+            if let Some(path) = self.preview_pending_path.take() {
+                self.preview_pending_since = None;
+                self.load_preview(&path);
+            }
+        }
+    }
+
+    /// Called every frame. Receives the result of the background preview thread
+    /// and stores it in both the active preview slot and the cache.
+    pub fn poll_preview_result(&mut self) {
+        let ready = self
+            .preview_result_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok());
+        if let Some((path, content)) = ready {
+            self.preview_result_rx = None;
+            // Discard stale results if the cursor moved away while loading.
+            if self.selected_path.as_deref() == Some(path.as_path()) {
+                self.cache_preview(path, content.clone());
+                self.preview_content = content;
+            }
+        }
     }
 
     /// Called every frame from the event loop. Non-blocking: if the background
@@ -301,8 +352,13 @@ impl AppState {
 
         let entry = &self.entries[self.cursor];
         if !entry.is_dir {
-            self.load_preview(&entry.path.clone());
+            // Debounce: record intent but don't load yet — poll_preview fires
+            // after the cursor has been still for the debounce delay.
+            self.preview_pending_path = Some(entry.path.clone());
+            self.preview_pending_since = Some(Instant::now());
         } else {
+            self.preview_pending_path = None;
+            self.preview_pending_since = None;
             self.selected_path = None;
             self.preview_content = PreviewContent::Empty;
         }
@@ -432,38 +488,67 @@ impl AppState {
             .collect();
     }
 
-    /// Read a file and populate `preview_content` with syntax-highlighted or
-    /// markdown-rendered lines. Lines are pre-rendered once here so the render
-    /// functions can simply iterate them with no further computation.
+    /// Kick off a background thread to read and render `path`. Returns immediately;
+    /// the result arrives via `poll_preview_result` on a future frame.
     fn load_preview(&mut self, path: &Path) {
-        self.selected_path = Some(path.to_path_buf());
+        let path_buf = path.to_path_buf();
+        self.selected_path = Some(path_buf.clone());
         self.preview_scroll = 0;
+
+        // Cache hit: no I/O needed.
+        if let Some(idx) = self.preview_cache.iter().position(|(p, _)| p == &path_buf) {
+            self.preview_content = self.preview_cache[idx].1.clone();
+            return;
+        }
+
+        // Cancel any in-flight load for a previous file.
+        self.preview_result_rx = None;
+        self.preview_content = PreviewContent::Loading;
 
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-
         let is_markdown = ext == "md" || ext == "markdown";
+        let preview_width = (self.terminal_size.0 as f32 * 0.7) as u16;
 
-        match fsx::read_file_text(path) {
-            Ok(text) => {
-                if is_markdown {
-                    let preview_width = (self.terminal_size.0 as f32 * 0.7) as u16;
-                    self.preview_content =
-                        PreviewContent::Markdown(render_markdown(&text, preview_width));
-                } else {
-                    let lines = self
-                        .highlighter
-                        .get_or_insert_with(Highlighter::new)
-                        .highlight_file(&text, &ext);
-                    self.preview_content = PreviewContent::Highlighted(lines);
+        // Ensure the shared highlighter exists before spawning so the Arc is ready.
+        if !is_markdown {
+            self.highlighter
+                .get_or_insert_with(|| Arc::new(Mutex::new(Highlighter::new())));
+        }
+        let highlighter = self.highlighter.as_ref().map(Arc::clone);
+
+        let (tx, rx) = mpsc::channel();
+        self.preview_result_rx = Some(rx);
+
+        std::thread::spawn(move || {
+            let content = match fsx::read_file_text(&path_buf) {
+                Ok(text) => {
+                    if is_markdown {
+                        PreviewContent::Markdown(render_markdown(&text, preview_width))
+                    } else if let Some(h) = highlighter {
+                        let lines = h.lock().unwrap().highlight_file(&text, &ext);
+                        PreviewContent::Highlighted(lines)
+                    } else {
+                        PreviewContent::Error("Highlighter unavailable".to_string())
+                    }
                 }
-            }
-            Err(e) => {
-                self.preview_content = PreviewContent::Error(e.to_string());
-            }
+                Err(e) => PreviewContent::Error(e.to_string()),
+            };
+            let _ = tx.send((path_buf, content));
+        });
+    }
+
+    /// Insert `content` into the preview cache under `path`, evicting the oldest
+    /// entry when the cache exceeds its capacity.
+    fn cache_preview(&mut self, path: PathBuf, content: PreviewContent) {
+        self.preview_cache.retain(|(p, _)| p != &path);
+        self.preview_cache.push((path, content));
+        const MAX_CACHE: usize = 20;
+        if self.preview_cache.len() > MAX_CACHE {
+            self.preview_cache.remove(0);
         }
     }
 }
