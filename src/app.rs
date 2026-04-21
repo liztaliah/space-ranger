@@ -9,6 +9,12 @@ use crate::highlight::Highlighter;
 use crate::input::AppAction;
 use crate::markdown::render_markdown;
 
+struct CacheEntry {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
     Browse,
@@ -43,13 +49,13 @@ pub struct AppState {
     pub search_query: String,
     pub delete_target: Option<PathBuf>,
     pub terminal_size: (u16, u16),
-    pub highlighter: Highlighter,
+    pub highlighter: Option<Highlighter>,
     pub should_quit: bool,
+    search_cache: Vec<CacheEntry>,
 }
 
 impl AppState {
     pub fn new(root: PathBuf) -> Result<Self> {
-        let highlighter = Highlighter::new();
         let mut state = Self {
             root: root.clone(),
             entries: Vec::new(),
@@ -62,8 +68,9 @@ impl AppState {
             search_query: String::new(),
             delete_target: None,
             terminal_size: (80, 24),
-            highlighter,
+            highlighter: None,
             should_quit: false,
+            search_cache: Vec::new(),
         };
         state.load_entries();
         Ok(state)
@@ -79,6 +86,17 @@ impl AppState {
             AppAction::OpenSearch => {
                 self.mode = AppMode::Search;
                 self.search_query.clear();
+                self.search_cache = WalkDir::new(&self.root)
+                    .min_depth(1)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .map(|e| {
+                        let path = e.path().to_path_buf();
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        let is_dir = path.is_dir();
+                        CacheEntry { name, path, is_dir }
+                    })
+                    .collect();
             }
             AppAction::CloseSearch => {
                 self.mode = AppMode::Browse;
@@ -208,10 +226,7 @@ impl AppState {
             })
             .collect();
 
-        let insert_pos = idx + 1;
-        for (i, entry) in new_entries.into_iter().enumerate() {
-            self.entries.insert(insert_pos + i, entry);
-        }
+        self.entries.splice(idx + 1..idx + 1, new_entries);
         Ok(())
     }
 
@@ -260,25 +275,16 @@ impl AppState {
 
     fn apply_search_filter(&mut self) {
         let query = self.search_query.to_lowercase();
-        self.entries = WalkDir::new(&self.root)
-            .min_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let name = e.file_name().to_string_lossy().to_lowercase();
-                name.contains(&query)
-            })
-            .map(|e| {
-                let path = e.path().to_path_buf();
-                let name = e.file_name().to_string_lossy().into_owned();
-                let is_dir = path.is_dir();
-                DirEntry {
-                    name,
-                    path,
-                    is_dir,
-                    depth: 0,
-                    is_expanded: false,
-                }
+        self.entries = self
+            .search_cache
+            .iter()
+            .filter(|e| e.name.to_lowercase().contains(&query))
+            .map(|e| DirEntry {
+                name: e.name.clone(),
+                path: e.path.clone(),
+                is_dir: e.is_dir,
+                depth: 0,
+                is_expanded: false,
             })
             .collect();
     }
@@ -302,8 +308,11 @@ impl AppState {
                     self.preview_content =
                         PreviewContent::Markdown(render_markdown(&text, preview_width));
                 } else {
-                    self.preview_content =
-                        PreviewContent::Highlighted(self.highlighter.highlight_file(&text, &ext));
+                    let lines = self
+                        .highlighter
+                        .get_or_insert_with(Highlighter::new)
+                        .highlight_file(&text, &ext);
+                    self.preview_content = PreviewContent::Highlighted(lines);
                 }
             }
             Err(e) => {
