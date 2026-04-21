@@ -43,10 +43,28 @@ pub fn read_file_text(path: &Path) -> Result<String> {
     if metadata.len() > 1_000_000 {
         anyhow::bail!("File too large to preview (>1MB)");
     }
-    // Use from_utf8_lossy so binary files display as text with replacement
-    // characters rather than returning an error.
+
     let bytes = fs::read(path)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+
+    // Avoid rendering binary files in the preview pane. Lossy UTF-8 decoding
+    // can retain control characters that corrupt terminal output.
+    if bytes.contains(&0) {
+        anyhow::bail!("Binary file cannot be previewed");
+    }
+
+    // Decode as UTF-8 (lossy for invalid sequences), then sanitize remaining
+    // control characters so only printable text plus common whitespace is shown.
+    let text = String::from_utf8_lossy(&bytes);
+    let safe: String = text
+        .chars()
+        .map(|c| match c {
+            '\n' | '\r' | '\t' => c,
+            _ if c.is_control() => ' ',
+            _ => c,
+        })
+        .collect();
+
+    Ok(safe)
 }
 
 pub fn delete_file(path: &Path) -> Result<()> {

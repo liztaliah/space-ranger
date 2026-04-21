@@ -9,7 +9,6 @@ use std::sync::mpsc::{self, Receiver};
 
 use anyhow::Result;
 use ratatui::text::Line;
-use walkdir::WalkDir;
 
 use crate::fs as fsx;
 use crate::highlight::Highlighter;
@@ -130,20 +129,29 @@ impl AppState {
                 self.search_query.clear();
                 self.entries.clear();
                 self.search_loading = true;
-                // Walk the tree in a background thread so the UI stays responsive.
-                // The main loop polls poll_search_cache() each frame via try_recv().
-                let root = self.root.clone();
+                self.search_cache.clear();
+
+                // Search only the selected directory's immediate contents.
+                // If the cursor is not on a directory, fall back to current root.
+                let search_root = self
+                    .entries
+                    .get(self.cursor)
+                    .filter(|entry| entry.is_dir)
+                    .map(|entry| entry.path.clone())
+                    .unwrap_or_else(|| self.root.clone());
+
+                // Build the one-level cache in a background thread so UI input
+                // remains responsive even for very large directories.
                 let (tx, rx) = mpsc::channel();
                 self.search_rx = Some(rx);
                 std::thread::spawn(move || {
-                    let results: SearchResult = WalkDir::new(&root)
-                        .min_depth(1)
+                    let results: SearchResult = fsx::read_dir_sorted(&search_root)
+                        .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|e| e.ok())
                         .map(|e| {
-                            let path = e.path().to_path_buf();
-                            let name = e.file_name().to_string_lossy().into_owned();
-                            let is_dir = path.is_dir();
+                            let name = e.name;
+                            let path = e.path;
+                            let is_dir = e.is_dir;
                             (name, path, is_dir)
                         })
                         .collect();
@@ -154,6 +162,9 @@ impl AppState {
             AppAction::CloseSearch => {
                 self.mode = AppMode::Browse;
                 self.search_query.clear();
+                self.search_rx = None;
+                self.search_loading = false;
+                self.search_cache.clear();
                 self.load_entries();
                 self.cursor = 0;
                 self.scroll_offset = 0;
@@ -169,11 +180,7 @@ impl AppState {
 
             AppAction::SearchBackspace => {
                 self.search_query.pop();
-                if self.search_query.is_empty() {
-                    self.load_entries();
-                } else {
-                    self.apply_search_filter();
-                }
+                self.apply_search_filter();
                 self.cursor = 0;
                 self.scroll_offset = 0;
             }
