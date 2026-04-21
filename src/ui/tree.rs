@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::Frame;
 
-use crate::app::AppState;
+use crate::app::{AppState, Focus};
 use crate::ui::theme;
 
 const ICON_DIR_CLOSED: &str = " ";
@@ -12,10 +12,12 @@ const ICON_DIR_OPEN: &str = " ";
 const ICON_FILE: &str = " ";
 
 pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
+    let focused = state.focus == Focus::Tree;
     let title = format!(" {} ", state.root.display());
+    let border_color = if focused { theme::BORDER } else { theme::MUTED };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER))
+        .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(theme::BG))
         .title(Span::styled(title, Style::default().fg(theme::TEXT)));
 

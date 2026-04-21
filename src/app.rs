@@ -22,6 +22,12 @@ pub enum AppMode {
     DeleteConfirm,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Focus {
+    Tree,
+    Preview,
+}
+
 pub struct DirEntry {
     pub name: String,
     pub path: PathBuf,
@@ -51,6 +57,7 @@ pub struct AppState {
     pub terminal_size: (u16, u16),
     pub highlighter: Option<Highlighter>,
     pub should_quit: bool,
+    pub focus: Focus,
     search_cache: Vec<CacheEntry>,
 }
 
@@ -70,6 +77,7 @@ impl AppState {
             terminal_size: (80, 24),
             highlighter: None,
             should_quit: false,
+            focus: Focus::Tree,
             search_cache: Vec::new(),
         };
         state.load_entries();
@@ -151,9 +159,51 @@ impl AppState {
                 self.delete_target = None;
                 self.mode = AppMode::Browse;
             }
+            AppAction::ToggleFocus => {
+                if self.focus == Focus::Preview {
+                    self.focus = Focus::Tree;
+                } else if !matches!(self.preview_content, PreviewContent::Empty) {
+                    self.focus = Focus::Preview;
+                }
+            }
+            AppAction::PreviewScrollDown => {
+                self.preview_scroll = self.preview_scroll.saturating_add(1);
+            }
+            AppAction::PreviewScrollUp => {
+                self.preview_scroll = self.preview_scroll.saturating_sub(1);
+            }
+            AppAction::PreviewPageDown => {
+                let page = self.preview_page_size();
+                self.preview_scroll = self.preview_scroll.saturating_add(page);
+            }
+            AppAction::PreviewPageUp => {
+                let page = self.preview_page_size();
+                self.preview_scroll = self.preview_scroll.saturating_sub(page);
+            }
+            AppAction::PreviewTop => {
+                self.preview_scroll = 0;
+            }
+            AppAction::PreviewBottom => {
+                let total = self.preview_line_count();
+                let page = self.preview_page_size();
+                self.preview_scroll = total.saturating_sub(page);
+            }
             AppAction::NoOp => {}
         }
         Ok(())
+    }
+
+    fn preview_page_size(&self) -> usize {
+        let h = self.terminal_size.1 as usize;
+        let inner = h.saturating_sub(4);
+        (inner / 2).max(1)
+    }
+
+    fn preview_line_count(&self) -> usize {
+        match &self.preview_content {
+            PreviewContent::Highlighted(lines) | PreviewContent::Markdown(lines) => lines.len(),
+            _ => 0,
+        }
     }
 
     fn move_cursor(&mut self, delta: i32) {
@@ -254,6 +304,7 @@ impl AppState {
             self.scroll_offset = 0;
             self.selected_path = None;
             self.preview_content = PreviewContent::Empty;
+            self.focus = Focus::Tree;
         }
     }
 

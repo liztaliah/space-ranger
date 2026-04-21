@@ -4,10 +4,11 @@ use ratatui::text::{Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{AppState, PreviewContent};
+use crate::app::{AppState, Focus, PreviewContent};
 use crate::ui::theme;
 
 pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
+    let focused = state.focus == Focus::Preview;
     let title = state
         .selected_path
         .as_ref()
@@ -15,9 +16,10 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|n| format!(" {} ", n.to_string_lossy()))
         .unwrap_or_else(|| " Preview ".to_owned());
 
+    let border_color = if focused { theme::PINK } else { theme::BORDER };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER))
+        .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(theme::BG))
         .title(Span::styled(title, Style::default().fg(theme::TEXT)));
 

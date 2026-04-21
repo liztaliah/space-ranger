@@ -30,7 +30,7 @@ pub fn render(f: &mut Frame, state: &AppState) {
 
     match state.mode {
         AppMode::Search => search::render(f, state, bottom_area),
-        AppMode::Browse | AppMode::DeleteConfirm => hints::render(f, bottom_area),
+        AppMode::Browse | AppMode::DeleteConfirm => hints::render(f, state, bottom_area),
     }
 
     if state.mode == AppMode::DeleteConfirm {

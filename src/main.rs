@@ -63,7 +63,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) => {
-                    let action = input::map_key(key, &state.mode);
+                    let action = input::map_key(key, &state.mode, &state.focus);
                     state.apply(action)?;
                     if state.should_quit {
                         break;

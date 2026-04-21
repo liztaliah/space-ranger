@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::AppMode;
+use crate::app::{AppMode, Focus};
 
 #[derive(Debug, PartialEq)]
 pub enum AppAction {
@@ -16,18 +16,28 @@ pub enum AppAction {
     DeleteSelected,
     ConfirmDelete,
     CancelDelete,
+    ToggleFocus,
+    PreviewScrollDown,
+    PreviewScrollUp,
+    PreviewPageDown,
+    PreviewPageUp,
+    PreviewTop,
+    PreviewBottom,
     NoOp,
 }
 
-pub fn map_key(key: KeyEvent, mode: &AppMode) -> AppAction {
+pub fn map_key(key: KeyEvent, mode: &AppMode, focus: &Focus) -> AppAction {
     match mode {
-        AppMode::Browse => map_browse(key),
+        AppMode::Browse => match focus {
+            Focus::Tree => map_tree(key),
+            Focus::Preview => map_preview(key),
+        },
         AppMode::Search => map_search(key),
         AppMode::DeleteConfirm => map_delete_confirm(key),
     }
 }
 
-fn map_browse(key: KeyEvent) -> AppAction {
+fn map_tree(key: KeyEvent) -> AppAction {
     match key.code {
         KeyCode::Char('q') => AppAction::Quit,
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::Quit,
@@ -37,6 +47,22 @@ fn map_browse(key: KeyEvent) -> AppAction {
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => AppAction::ParentDir,
         KeyCode::Char('/') => AppAction::OpenSearch,
         KeyCode::Char('d') => AppAction::DeleteSelected,
+        KeyCode::Tab => AppAction::ToggleFocus,
+        _ => AppAction::NoOp,
+    }
+}
+
+fn map_preview(key: KeyEvent) -> AppAction {
+    match key.code {
+        KeyCode::Char('q') => AppAction::Quit,
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::Quit,
+        KeyCode::Char('j') | KeyCode::Down => AppAction::PreviewScrollDown,
+        KeyCode::Char('k') | KeyCode::Up => AppAction::PreviewScrollUp,
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::PreviewPageDown,
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::PreviewPageUp,
+        KeyCode::Char('g') => AppAction::PreviewTop,
+        KeyCode::Char('G') => AppAction::PreviewBottom,
+        KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => AppAction::ToggleFocus,
         _ => AppAction::NoOp,
     }
 }
@@ -73,33 +99,42 @@ mod tests {
         }
     }
 
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
     #[test]
     fn browse_quit() {
-        assert_eq!(map_key(key(KeyCode::Char('q')), &AppMode::Browse), AppAction::Quit);
+        assert_eq!(map_key(key(KeyCode::Char('q')), &AppMode::Browse, &Focus::Tree), AppAction::Quit);
     }
 
     #[test]
     fn browse_vim_nav() {
-        assert_eq!(map_key(key(KeyCode::Char('j')), &AppMode::Browse), AppAction::CursorDown);
-        assert_eq!(map_key(key(KeyCode::Char('k')), &AppMode::Browse), AppAction::CursorUp);
-        assert_eq!(map_key(key(KeyCode::Char('l')), &AppMode::Browse), AppAction::EnterOrExpand);
-        assert_eq!(map_key(key(KeyCode::Char('h')), &AppMode::Browse), AppAction::ParentDir);
+        assert_eq!(map_key(key(KeyCode::Char('j')), &AppMode::Browse, &Focus::Tree), AppAction::CursorDown);
+        assert_eq!(map_key(key(KeyCode::Char('k')), &AppMode::Browse, &Focus::Tree), AppAction::CursorUp);
+        assert_eq!(map_key(key(KeyCode::Char('l')), &AppMode::Browse, &Focus::Tree), AppAction::EnterOrExpand);
+        assert_eq!(map_key(key(KeyCode::Char('h')), &AppMode::Browse, &Focus::Tree), AppAction::ParentDir);
     }
 
     #[test]
     fn browse_open_search() {
-        assert_eq!(map_key(key(KeyCode::Char('/')), &AppMode::Browse), AppAction::OpenSearch);
+        assert_eq!(map_key(key(KeyCode::Char('/')), &AppMode::Browse, &Focus::Tree), AppAction::OpenSearch);
     }
 
     #[test]
     fn search_escape_closes() {
-        assert_eq!(map_key(key(KeyCode::Esc), &AppMode::Search), AppAction::CloseSearch);
+        assert_eq!(map_key(key(KeyCode::Esc), &AppMode::Search, &Focus::Tree), AppAction::CloseSearch);
     }
 
     #[test]
     fn search_char_input() {
         assert_eq!(
-            map_key(key(KeyCode::Char('a')), &AppMode::Search),
+            map_key(key(KeyCode::Char('a')), &AppMode::Search, &Focus::Tree),
             AppAction::SearchInput('a')
         );
     }
@@ -107,7 +142,7 @@ mod tests {
     #[test]
     fn delete_confirm_y() {
         assert_eq!(
-            map_key(key(KeyCode::Char('y')), &AppMode::DeleteConfirm),
+            map_key(key(KeyCode::Char('y')), &AppMode::DeleteConfirm, &Focus::Tree),
             AppAction::ConfirmDelete
         );
     }
@@ -115,8 +150,28 @@ mod tests {
     #[test]
     fn delete_confirm_n() {
         assert_eq!(
-            map_key(key(KeyCode::Char('n')), &AppMode::DeleteConfirm),
+            map_key(key(KeyCode::Char('n')), &AppMode::DeleteConfirm, &Focus::Tree),
             AppAction::CancelDelete
         );
+    }
+
+    #[test]
+    fn preview_scroll() {
+        assert_eq!(map_key(key(KeyCode::Char('j')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewScrollDown);
+        assert_eq!(map_key(key(KeyCode::Char('k')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewScrollUp);
+        assert_eq!(map_key(ctrl(KeyCode::Char('d')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewPageDown);
+        assert_eq!(map_key(ctrl(KeyCode::Char('u')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewPageUp);
+    }
+
+    #[test]
+    fn preview_top_bottom() {
+        assert_eq!(map_key(key(KeyCode::Char('g')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewTop);
+        assert_eq!(map_key(key(KeyCode::Char('G')), &AppMode::Browse, &Focus::Preview), AppAction::PreviewBottom);
+    }
+
+    #[test]
+    fn tab_toggles_focus() {
+        assert_eq!(map_key(key(KeyCode::Tab), &AppMode::Browse, &Focus::Tree), AppAction::ToggleFocus);
+        assert_eq!(map_key(key(KeyCode::Tab), &AppMode::Browse, &Focus::Preview), AppAction::ToggleFocus);
     }
 }
