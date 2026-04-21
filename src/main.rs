@@ -58,6 +58,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
     let mut state = AppState::new(root)?;
 
     loop {
+        state.poll_search_cache();
         terminal.draw(|f| ui::render(f, &state))?;
 
         if event::poll(Duration::from_millis(50))? {

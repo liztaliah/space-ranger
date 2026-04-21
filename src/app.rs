@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 
 use anyhow::Result;
 use ratatui::text::Line;
@@ -14,6 +15,8 @@ struct CacheEntry {
     path: PathBuf,
     is_dir: bool,
 }
+
+type SearchResult = Vec<(String, PathBuf, bool)>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
@@ -58,7 +61,9 @@ pub struct AppState {
     pub highlighter: Option<Highlighter>,
     pub should_quit: bool,
     pub focus: Focus,
+    pub search_loading: bool,
     search_cache: Vec<CacheEntry>,
+    search_rx: Option<Receiver<SearchResult>>,
 }
 
 impl AppState {
@@ -78,7 +83,9 @@ impl AppState {
             highlighter: None,
             should_quit: false,
             focus: Focus::Tree,
+            search_loading: false,
             search_cache: Vec::new(),
+            search_rx: None,
         };
         state.load_entries();
         Ok(state)
@@ -94,17 +101,25 @@ impl AppState {
             AppAction::OpenSearch => {
                 self.mode = AppMode::Search;
                 self.search_query.clear();
-                self.search_cache = WalkDir::new(&self.root)
-                    .min_depth(1)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .map(|e| {
-                        let path = e.path().to_path_buf();
-                        let name = e.file_name().to_string_lossy().into_owned();
-                        let is_dir = path.is_dir();
-                        CacheEntry { name, path, is_dir }
-                    })
-                    .collect();
+                self.entries.clear();
+                self.search_loading = true;
+                let root = self.root.clone();
+                let (tx, rx) = mpsc::channel();
+                self.search_rx = Some(rx);
+                std::thread::spawn(move || {
+                    let results: SearchResult = WalkDir::new(&root)
+                        .min_depth(1)
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                        .map(|e| {
+                            let path = e.path().to_path_buf();
+                            let name = e.file_name().to_string_lossy().into_owned();
+                            let is_dir = path.is_dir();
+                            (name, path, is_dir)
+                        })
+                        .collect();
+                    let _ = tx.send(results);
+                });
             }
             AppAction::CloseSearch => {
                 self.mode = AppMode::Browse;
@@ -191,6 +206,22 @@ impl AppState {
             AppAction::NoOp => {}
         }
         Ok(())
+    }
+
+    pub fn poll_search_cache(&mut self) {
+        let ready = self
+            .search_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok());
+        if let Some(results) = ready {
+            self.search_cache = results
+                .into_iter()
+                .map(|(name, path, is_dir)| CacheEntry { name, path, is_dir })
+                .collect();
+            self.search_rx = None;
+            self.search_loading = false;
+            self.apply_search_filter();
+        }
     }
 
     fn preview_page_size(&self) -> usize {

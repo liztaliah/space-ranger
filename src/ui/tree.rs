@@ -1,7 +1,7 @@
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{AppState, Focus};
@@ -79,6 +79,15 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
             ListItem::new(line)
         })
         .collect();
+
+    if state.search_loading {
+        let loading = Paragraph::new("Scanning…")
+            .block(block)
+            .style(Style::default().fg(theme::MUTED))
+            .alignment(Alignment::Center);
+        f.render_widget(loading, area);
+        return;
+    }
 
     let list = List::new(items)
         .block(block)
