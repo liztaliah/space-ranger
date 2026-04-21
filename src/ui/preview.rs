@@ -1,3 +1,5 @@
+//! Right panel: file preview with syntax highlighting or markdown rendering.
+
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Span, Text};
@@ -16,6 +18,7 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|n| format!(" {} ", n.to_string_lossy()))
         .unwrap_or_else(|| " Preview ".to_owned());
 
+    // Pink border when this panel has focus; blue otherwise.
     let border_color = if focused { theme::PINK } else { theme::BORDER };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -39,6 +42,7 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
             f.render_widget(para, area);
         }
         PreviewContent::Highlighted(lines) => {
+            // Lines are pre-rendered in AppState::load_preview — no work here.
             let text = Text::from(lines.clone());
             let para = Paragraph::new(text)
                 .block(block)
@@ -46,6 +50,9 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
             f.render_widget(para, area);
         }
         PreviewContent::Markdown(lines) => {
+            // Wrap markdown output because termimad produces unwrapped lines
+            // based on the requested width, but terminal resizing can invalidate
+            // that width. The wrap here acts as a safety net.
             let text = Text::from(lines.clone());
             let para = Paragraph::new(text)
                 .block(block)

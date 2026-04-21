@@ -1,3 +1,6 @@
+//! Key binding hints bar — the single row at the bottom of the screen.
+//! Content switches depending on which panel currently has focus.
+
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};

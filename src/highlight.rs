@@ -1,3 +1,9 @@
+//! Converts syntect syntax-highlighted text into ratatui Spans.
+//!
+//! Highlighting is expensive to initialise (~300ms for the default syntax set),
+//! so `Highlighter` is constructed lazily on first use via AppState's
+//! `Option<Highlighter>` field rather than at app startup.
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
@@ -17,10 +23,15 @@ impl Highlighter {
         }
     }
 
+    /// Highlight `text` using the syntax for `extension` and return it as a
+    /// `Vec<Line<'static>>`. Lines are owned (`.to_owned()` on each span's text)
+    /// so they can be stored directly in `AppState` and rendered without
+    /// re-running the highlighter each frame.
     pub fn highlight_file(&self, text: &str, extension: &str) -> Vec<Line<'static>> {
         let syntax = self
             .syntax_set
             .find_syntax_by_extension(extension)
+            // Fall back to plain text so unknown extensions still display.
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
         let theme = &self.theme_set.themes["base16-ocean.dark"];
@@ -41,6 +52,8 @@ impl Highlighter {
     }
 }
 
+/// Convert a syntect (style, text) pair into a ratatui Span with an owned
+/// string. The `'static` lifetime comes from the `.to_owned()` call.
 fn syntect_to_span(style: &SyntectStyle, text: &str) -> Span<'static> {
     let fg = style.foreground;
     let mut ratatui_style = Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b));

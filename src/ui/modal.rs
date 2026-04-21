@@ -1,3 +1,12 @@
+//! Delete confirmation modal overlay.
+//!
+//! ratatui has no built-in modal system. The technique used here:
+//!   1. Compute a centered Rect over the full terminal area.
+//!   2. Render `Clear` to erase whatever was drawn underneath.
+//!   3. Draw the dialog box on top.
+//! Because modals are rendered last in ui/mod.rs, they always appear above
+//! the tree and preview panels.
+
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -16,6 +25,8 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .unwrap_or_default();
 
     let modal_rect = centered_rect(60, 7, area);
+    // Erase the background before drawing the dialog, otherwise panel content
+    // would show through.
     f.render_widget(Clear, modal_rect);
 
     let block = Block::default()
@@ -28,22 +39,12 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             format!("\"{}\"", filename),
-            Style::default()
-                .fg(theme::TEXT)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            "This cannot be undone.",
-            Style::default().fg(theme::MUTED),
-        )),
+        Line::from(Span::styled("This cannot be undone.", Style::default().fg(theme::MUTED))),
         Line::from(""),
         Line::from(vec![
-            Span::styled(
-                "  [y] Delete  ",
-                Style::default()
-                    .fg(theme::RED)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("  [y] Delete  ", Style::default().fg(theme::RED).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
             Span::styled("  [n] Cancel  ", Style::default().fg(theme::TEXT)),
         ]),
@@ -55,6 +56,7 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(para, modal_rect);
 }
 
+/// Returns a `Rect` of the given `width` × `height` centered within `area`.
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let h_pad = area.width.saturating_sub(width) / 2;
     let v_pad = area.height.saturating_sub(height) / 2;

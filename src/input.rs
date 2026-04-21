@@ -1,3 +1,10 @@
+//! Pure key-event → AppAction mapping.
+//!
+//! `map_key` takes the current mode and focus so the same physical key can
+//! mean different things (e.g. `j` moves the tree cursor in Tree focus but
+//! scrolls the preview in Preview focus). Keeping this logic in its own module
+//! makes it trivially unit-testable without a running terminal.
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{AppMode, Focus};
@@ -5,17 +12,21 @@ use crate::app::{AppMode, Focus};
 #[derive(Debug, PartialEq)]
 pub enum AppAction {
     Quit,
+    // Tree navigation
     CursorUp,
     CursorDown,
     EnterOrExpand,
     ParentDir,
+    // Search
     OpenSearch,
     CloseSearch,
     SearchInput(char),
     SearchBackspace,
+    // File deletion
     DeleteSelected,
     ConfirmDelete,
     CancelDelete,
+    // Preview
     ToggleFocus,
     PreviewScrollDown,
     PreviewScrollUp,
@@ -62,6 +73,7 @@ fn map_preview(key: KeyEvent) -> AppAction {
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::PreviewPageUp,
         KeyCode::Char('g') => AppAction::PreviewTop,
         KeyCode::Char('G') => AppAction::PreviewBottom,
+        // h, Esc, and Tab all return focus to the tree for easy one-handed use.
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc | KeyCode::Tab => AppAction::ToggleFocus,
         _ => AppAction::NoOp,
     }

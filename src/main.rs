@@ -1,3 +1,8 @@
+//! Entry point: terminal setup/teardown, panic hook, and the main event loop.
+//!
+//! Uses ratatui's immediate-mode model: every iteration redraws the full UI
+//! from AppState, then blocks up to 50ms waiting for a key event.
+
 mod app;
 mod fs;
 mod highlight;
@@ -32,6 +37,8 @@ fn main() -> Result<()> {
         None => std::env::current_dir()?,
     };
 
+    // Restore the terminal if the app panics — without this, a panic in raw mode
+    // leaves the terminal in an unusable state (no echo, alternate screen stuck).
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(io::stderr(), LeaveAlternateScreen);
@@ -47,6 +54,7 @@ fn main() -> Result<()> {
 
     let result = run(&mut terminal, root);
 
+    // Always restore the terminal, even if run() returned an error.
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
@@ -58,9 +66,14 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
     let mut state = AppState::new(root)?;
 
     loop {
+        // Check whether the background search-cache thread has finished.
+        // This is non-blocking (try_recv) so it never stalls the render loop.
         state.poll_search_cache();
+
         terminal.draw(|f| ui::render(f, &state))?;
 
+        // Block for up to 50ms; if no event arrives we redraw anyway (handles
+        // things like the search loading indicator resolving between keystrokes).
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) => {

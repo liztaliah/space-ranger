@@ -1,3 +1,9 @@
+//! Top-level render function and layout.
+//!
+//! ratatui is immediate-mode: this function redraws the entire terminal from
+//! scratch every frame. There is no diffing or retained widget state — each
+//! call to `render` produces a complete description of what to display.
+
 mod hints;
 pub mod modal;
 pub mod preview;
@@ -13,12 +19,14 @@ use crate::app::{AppMode, AppState};
 pub fn render(f: &mut Frame, state: &AppState) {
     let area = f.area();
 
+    // Reserve one row at the bottom for the hints/search bar.
     let [main_area, bottom_area] = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .areas(area);
 
+    // Split main area 30% tree / 70% preview.
     let [tree_area, preview_area] = Layout::horizontal([
         Constraint::Percentage(30),
         Constraint::Percentage(70),
@@ -33,6 +41,7 @@ pub fn render(f: &mut Frame, state: &AppState) {
         AppMode::Browse | AppMode::DeleteConfirm => hints::render(f, state, bottom_area),
     }
 
+    // The modal is drawn last so it paints over both panels.
     if state.mode == AppMode::DeleteConfirm {
         modal::render(f, state, area);
     }

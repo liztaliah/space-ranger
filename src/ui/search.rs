@@ -1,3 +1,5 @@
+//! Bottom search bar — shown only when AppMode::Search is active.
+
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -7,6 +9,7 @@ use crate::app::AppState;
 use crate::ui::theme;
 
 pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
+    // The leading '/' mirrors the vim search prompt, making the mode obvious.
     let text = format!("/{}", state.search_query);
     let para = Paragraph::new(text)
         .block(
