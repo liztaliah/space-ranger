@@ -4,7 +4,11 @@
 //! functions in `ui/` read it; `apply()` is the only way to mutate it.
 //! This makes the data flow easy to follow: key event → AppAction → apply().
 
-use std::path::{Path, PathBuf};
+mod nav;
+mod preview;
+mod search;
+
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -15,7 +19,6 @@ use ratatui::text::Line;
 use crate::fs as fsx;
 use crate::highlight::Highlighter;
 use crate::input::AppAction;
-use crate::markdown::render_markdown;
 
 // Internal type for the search background thread's results. Uses plain tuples
 // so it crosses the thread boundary without requiring CacheEntry to be Send.
@@ -163,12 +166,7 @@ impl AppState {
                     let results: SearchResult = fsx::read_dir_sorted(&search_root)
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|e| {
-                            let name = e.name;
-                            let path = e.path;
-                            let is_dir = e.is_dir;
-                            (name, path, is_dir)
-                        })
+                        .map(|e| (e.name, e.path, e.is_dir))
                         .collect();
                     let _ = tx.send(results);
                 });
@@ -324,231 +322,6 @@ impl AppState {
             self.search_rx = None;
             self.search_loading = false;
             self.apply_search_filter();
-        }
-    }
-
-    /// Half the visible preview height — used for ctrl+d / ctrl+u page scrolling.
-    fn preview_page_size(&self) -> usize {
-        let h = self.terminal_size.1 as usize;
-        let inner = h.saturating_sub(4); // subtract borders + hint bar
-        (inner / 2).max(1)
-    }
-
-    fn preview_line_count(&self) -> usize {
-        match &self.preview_content {
-            PreviewContent::Highlighted(lines) | PreviewContent::Markdown(lines) => lines.len(),
-            _ => 0,
-        }
-    }
-
-    fn move_cursor(&mut self, delta: i32) {
-        let len = self.entries.len();
-        if len == 0 {
-            return;
-        }
-        let new = (self.cursor as i32 + delta).clamp(0, len as i32 - 1) as usize;
-        self.cursor = new;
-        self.update_scroll();
-
-        let entry = &self.entries[self.cursor];
-        if !entry.is_dir {
-            // Debounce: record intent but don't load yet — poll_preview fires
-            // after the cursor has been still for the debounce delay.
-            self.preview_pending_path = Some(entry.path.clone());
-            self.preview_pending_since = Some(Instant::now());
-        } else {
-            self.preview_pending_path = None;
-            self.preview_pending_since = None;
-            self.selected_path = None;
-            self.preview_content = PreviewContent::Empty;
-        }
-    }
-
-    /// Keep scroll_offset so the cursor row is always visible.
-    fn update_scroll(&mut self) {
-        let tree_height = self.tree_height();
-        if self.cursor < self.scroll_offset {
-            self.scroll_offset = self.cursor;
-        } else if self.cursor >= self.scroll_offset + tree_height {
-            self.scroll_offset = self.cursor + 1 - tree_height;
-        }
-    }
-
-    fn tree_height(&self) -> usize {
-        let h = self.terminal_size.1 as usize;
-        if h > 4 { h - 4 } else { 1 }
-    }
-
-    fn enter_or_expand(&mut self) -> Result<()> {
-        if self.entries.is_empty() {
-            return Ok(());
-        }
-        let idx = self.cursor;
-        let is_dir = self.entries[idx].is_dir;
-        let is_expanded = self.entries[idx].is_expanded;
-        let path = self.entries[idx].path.clone();
-
-        if is_dir {
-            if is_expanded {
-                self.collapse_dir(idx);
-            } else {
-                self.expand_dir(idx)?;
-            }
-        } else {
-            self.load_preview(&path);
-        }
-        Ok(())
-    }
-
-    /// Insert the directory's children into `entries` directly after `idx`.
-    /// Using splice() instead of repeated insert() keeps this O(n) not O(n²).
-    fn expand_dir(&mut self, idx: usize) -> Result<()> {
-        self.entries[idx].is_expanded = true;
-        let parent_depth = self.entries[idx].depth;
-        let parent_path = self.entries[idx].path.clone();
-
-        let children = fsx::read_dir_sorted(&parent_path).unwrap_or_default();
-        let new_entries: Vec<DirEntry> = children
-            .into_iter()
-            .map(|e| DirEntry {
-                name: e.name,
-                path: e.path,
-                is_dir: e.is_dir,
-                depth: parent_depth + 1,
-                is_expanded: false,
-            })
-            .collect();
-
-        self.entries.splice(idx + 1..idx + 1, new_entries);
-        Ok(())
-    }
-
-    /// Remove all descendants of the directory at `idx` from `entries`.
-    /// Descendants are identified by having a depth greater than the directory's.
-    fn collapse_dir(&mut self, idx: usize) {
-        self.entries[idx].is_expanded = false;
-        let depth = self.entries[idx].depth;
-        let mut end = idx + 1;
-        while end < self.entries.len() && self.entries[end].depth > depth {
-            end += 1;
-        }
-        self.entries.drain(idx + 1..end);
-        // Keep the cursor pointing at the same logical item after the drain.
-        if self.cursor > idx && self.cursor < end {
-            self.cursor = idx;
-        } else if self.cursor >= end {
-            self.cursor -= end - idx - 1;
-        }
-        self.update_scroll();
-    }
-
-    fn go_parent(&mut self) {
-        if let Some(parent) = self.root.parent().map(|p| p.to_path_buf()) {
-            self.root = parent;
-            self.load_entries();
-            self.cursor = 0;
-            self.scroll_offset = 0;
-            self.selected_path = None;
-            self.preview_content = PreviewContent::Empty;
-            self.focus = Focus::Tree;
-        }
-    }
-
-    /// (Re)load the top-level entries for the current root directory.
-    fn load_entries(&mut self) {
-        self.entries = match fsx::read_dir_sorted(&self.root) {
-            Ok(children) => children
-                .into_iter()
-                .map(|e| DirEntry {
-                    name: e.name,
-                    path: e.path,
-                    is_dir: e.is_dir,
-                    depth: 0,
-                    is_expanded: false,
-                })
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-    }
-
-    /// Filter search_cache by the current query string (case-insensitive substring match).
-    fn apply_search_filter(&mut self) {
-        let query = self.search_query.to_lowercase();
-        self.entries = self
-            .search_cache
-            .iter()
-            .filter(|e| e.name.to_lowercase().contains(&query))
-            .map(|e| DirEntry {
-                name: e.name.clone(),
-                path: e.path.clone(),
-                is_dir: e.is_dir,
-                depth: 0,
-                is_expanded: false,
-            })
-            .collect();
-    }
-
-    /// Kick off a background thread to read and render `path`. Returns immediately;
-    /// the result arrives via `poll_preview_result` on a future frame.
-    fn load_preview(&mut self, path: &Path) {
-        let path_buf = path.to_path_buf();
-        self.selected_path = Some(path_buf.clone());
-        self.preview_scroll = 0;
-
-        // Cache hit: no I/O needed.
-        if let Some(idx) = self.preview_cache.iter().position(|(p, _)| p == &path_buf) {
-            self.preview_content = self.preview_cache[idx].1.clone();
-            return;
-        }
-
-        // Cancel any in-flight load for a previous file.
-        self.preview_result_rx = None;
-        self.preview_content = PreviewContent::Loading;
-
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let is_markdown = ext == "md" || ext == "markdown";
-        let preview_width = (self.terminal_size.0 as f32 * 0.7) as u16;
-
-        // Ensure the shared highlighter exists before spawning so the Arc is ready.
-        if !is_markdown {
-            self.highlighter
-                .get_or_insert_with(|| Arc::new(Mutex::new(Highlighter::new())));
-        }
-        let highlighter = self.highlighter.as_ref().map(Arc::clone);
-
-        let (tx, rx) = mpsc::channel();
-        self.preview_result_rx = Some(rx);
-
-        std::thread::spawn(move || {
-            let content = match fsx::read_file_text(&path_buf) {
-                Ok(text) => {
-                    if is_markdown {
-                        PreviewContent::Markdown(render_markdown(&text, preview_width))
-                    } else if let Some(h) = highlighter {
-                        let lines = h.lock().unwrap().highlight_file(&text, &ext);
-                        PreviewContent::Highlighted(lines)
-                    } else {
-                        PreviewContent::Error("Highlighter unavailable".to_string())
-                    }
-                }
-                Err(e) => PreviewContent::Error(e.to_string()),
-            };
-            let _ = tx.send((path_buf, content));
-        });
-    }
-
-    /// Insert `content` into the preview cache under `path`, evicting the oldest
-    /// entry when the cache exceeds its capacity.
-    fn cache_preview(&mut self, path: PathBuf, content: PreviewContent) {
-        self.preview_cache.retain(|(p, _)| p != &path);
-        self.preview_cache.push((path, content));
-        const MAX_CACHE: usize = 20;
-        if self.preview_cache.len() > MAX_CACHE {
-            self.preview_cache.remove(0);
         }
     }
 }
