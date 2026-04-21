@@ -1,0 +1,10 @@
+use ratatui::style::Color;
+
+pub const BG: Color = Color::Rgb(0x2d, 0x31, 0x35);
+pub const SURFACE: Color = Color::Rgb(0x35, 0x3a, 0x3e);
+pub const BORDER: Color = Color::Rgb(0x7a, 0xb5, 0xd8);
+pub const PINK: Color = Color::Rgb(0xc0, 0x7e, 0xc5);
+pub const GREEN: Color = Color::Rgb(0x6a, 0xaa, 0x72);
+pub const TEXT: Color = Color::Rgb(0xcd, 0xd1, 0xd5);
+pub const MUTED: Color = Color::Rgb(0x6a, 0x70, 0x75);
+pub const RED: Color = Color::Rgb(0xbf, 0x61, 0x6a);

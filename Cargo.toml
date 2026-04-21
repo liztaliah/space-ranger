@@ -1,0 +1,16 @@
+[package]
+name = "calc-rust"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fbrowse"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+termimad = "0.23"
+walkdir = "2.5"
+anyhow = "1.0"
