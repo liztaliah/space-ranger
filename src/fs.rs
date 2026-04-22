@@ -71,3 +71,12 @@ pub fn delete_file(path: &Path) -> Result<()> {
     fs::remove_file(path)?;
     Ok(())
 }
+
+pub fn rename_file(path: &Path, new_name: &str) -> Result<()> {
+    let new_path = path.with_file_name(new_name);
+    if new_path.exists() {
+        anyhow::bail!("A file named \"{}\" already exists", new_name);
+    }
+    fs::rename(path, new_path)?;
+    Ok(())
+}

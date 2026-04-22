@@ -6,7 +6,7 @@
 //! vec — see `app::expand_dir` and `app::collapse_dir`.
 
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
@@ -95,8 +95,8 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .block(block)
         .highlight_style(
             Style::default()
-                .bg(theme::SURFACE)
-                .fg(theme::PINK)
+                .bg(theme::PINK)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");

@@ -38,11 +38,14 @@ pub fn render(f: &mut Frame, state: &AppState) {
 
     match state.mode {
         AppMode::Search => search::render(f, state, bottom_area),
-        AppMode::Browse | AppMode::DeleteConfirm => hints::render(f, state, bottom_area),
+        AppMode::Browse | AppMode::DeleteConfirm | AppMode::Rename => hints::render(f, state, bottom_area),
     }
 
-    // The modal is drawn last so it paints over both panels.
+    // Modals are drawn last so they paint over both panels.
     if state.mode == AppMode::DeleteConfirm {
         modal::render(f, state, area);
+    }
+    if state.mode == AppMode::Rename {
+        modal::render_rename(f, state, area);
     }
 }

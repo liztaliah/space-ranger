@@ -22,6 +22,10 @@ impl AppState {
             // after the cursor has been still for the debounce delay.
             self.preview_pending_path = Some(entry.path.clone());
             self.preview_pending_since = Some(Instant::now());
+            // Clear immediately so the old file's content doesn't stay visible
+            // during the debounce window while the user is still scrolling.
+            self.selected_path = None;
+            self.preview_content = PreviewContent::Empty;
         } else {
             self.preview_pending_path = None;
             self.preview_pending_since = None;
@@ -123,7 +127,7 @@ impl AppState {
     }
 
     /// Keep scroll_offset so the cursor row is always visible.
-    fn update_scroll(&mut self) {
+    pub(super) fn update_scroll(&mut self) {
         let tree_height = self.tree_height();
         if self.cursor < self.scroll_offset {
             self.scroll_offset = self.cursor;

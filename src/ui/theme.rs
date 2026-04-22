@@ -2,7 +2,7 @@
 
 use ratatui::style::Color;
 
-pub const BG: Color      = Color::Rgb(0x2d, 0x31, 0x35); // main background
+pub const BG: Color      = Color::Reset; // defer to terminal background
 pub const SURFACE: Color = Color::Rgb(0x35, 0x3a, 0x3e); // panel backgrounds / modal
 pub const BORDER: Color  = Color::Rgb(0x7a, 0xb5, 0xd8); // active tree border, directory names
 pub const PINK: Color    = Color::Rgb(0xc0, 0x7e, 0xc5); // active preview border, cursor highlight

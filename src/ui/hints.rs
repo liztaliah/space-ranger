@@ -34,6 +34,8 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
             Span::styled(":search  ", Style::default().fg(theme::MUTED)),
             Span::styled("d", Style::default().fg(theme::BORDER)),
             Span::styled(":delete  ", Style::default().fg(theme::MUTED)),
+            Span::styled("r", Style::default().fg(theme::BORDER)),
+            Span::styled(":rename  ", Style::default().fg(theme::MUTED)),
             Span::styled("q", Style::default().fg(theme::BORDER)),
             Span::styled(":quit ", Style::default().fg(theme::MUTED)),
         ])

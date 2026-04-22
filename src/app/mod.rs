@@ -36,6 +36,7 @@ pub enum AppMode {
     Browse,
     Search,
     DeleteConfirm,
+    Rename,
 }
 
 /// Which panel currently receives keyboard input.
@@ -83,6 +84,24 @@ pub struct AppState {
     pub mode: AppMode,
     pub search_query: String,
     pub delete_target: Option<PathBuf>,
+    pub rename_target: Option<PathBuf>,
+    // Rename dialog state.
+    // The filename is split into stem + ext so the extension is protected by
+    // default. "Fresh" flags implement a select-on-first-keypress UX: while
+    // fresh, the next character replaces the whole field instead of appending.
+    /// Editable stem (everything before the extension).
+    pub rename_stem: String,
+    /// Protected extension including leading dot (e.g. ".rs"). Empty for no-extension files.
+    pub rename_ext: String,
+    /// True from open until the first keystroke — causes next keypress to replace the stem.
+    pub rename_fresh: bool,
+    /// False = Rename button focused; true = Cancel button focused.
+    pub rename_cancel_focused: bool,
+    /// True when the cursor has moved into the extension field via →.
+    pub rename_ext_focused: bool,
+    /// True from when ext is first focused until the first ext keypress — causes
+    /// next input to replace the extension name while keeping the dot.
+    pub rename_ext_fresh: bool,
     pub terminal_size: (u16, u16),
     /// Shared with background preview threads — initialized on first preview.
     pub highlighter: Option<Arc<Mutex<Highlighter>>>,
@@ -90,6 +109,8 @@ pub struct AppState {
     pub focus: Focus,
     /// True while the background search-cache walk is still running.
     pub search_loading: bool,
+    /// The directory that was passed to the search thread — used to navigate back on confirm.
+    search_root: PathBuf,
     /// Flat list of every file under root, built once per search session.
     search_cache: Vec<CacheEntry>,
     /// Receives the completed cache from the background thread.
@@ -116,11 +137,19 @@ impl AppState {
             mode: AppMode::Browse,
             search_query: String::new(),
             delete_target: None,
+            rename_target: None,
+            rename_stem: String::new(),
+            rename_ext: String::new(),
+            rename_fresh: false,
+            rename_cancel_focused: false,
+            rename_ext_focused: false,
+            rename_ext_fresh: false,
             terminal_size: (80, 24),
             highlighter: None,
             should_quit: false,
             focus: Focus::Tree,
             search_loading: false,
+            search_root: root.clone(),
             search_cache: Vec::new(),
             search_rx: None,
             preview_pending_path: None,
@@ -143,20 +172,30 @@ impl AppState {
             AppAction::ParentDir => self.go_parent(),
 
             AppAction::OpenSearch => {
+                // Determine search root before clearing entries.
+                // Expanded dir → search it; file → search its parent; anything else → root.
+                let search_root = self
+                    .entries
+                    .get(self.cursor)
+                    .map(|entry| {
+                        if entry.is_dir && entry.is_expanded {
+                            entry.path.clone()
+                        } else if !entry.is_dir {
+                            entry.path.parent()
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| self.root.clone())
+                        } else {
+                            self.root.clone()
+                        }
+                    })
+                    .unwrap_or_else(|| self.root.clone());
+
+                self.search_root = search_root.clone();
                 self.mode = AppMode::Search;
                 self.search_query.clear();
                 self.entries.clear();
                 self.search_loading = true;
                 self.search_cache.clear();
-
-                // Search only the selected directory's immediate contents.
-                // If the cursor is not on a directory, fall back to current root.
-                let search_root = self
-                    .entries
-                    .get(self.cursor)
-                    .filter(|entry| entry.is_dir)
-                    .map(|entry| entry.path.clone())
-                    .unwrap_or_else(|| self.root.clone());
 
                 // Build the one-level cache in a background thread so UI input
                 // remains responsive even for very large directories.
@@ -181,6 +220,36 @@ impl AppState {
                 self.load_entries();
                 self.cursor = 0;
                 self.scroll_offset = 0;
+            }
+
+            AppAction::SearchConfirm => {
+                // Capture the selected path before clearing search state.
+                let selected = self.entries.get(self.cursor).map(|e| e.path.clone());
+
+                self.mode = AppMode::Browse;
+                self.search_query.clear();
+                self.search_rx = None;
+                self.search_loading = false;
+                self.search_cache.clear();
+
+                // Navigate to the searched directory if it differs from the current root.
+                if self.search_root != self.root {
+                    self.root = self.search_root.clone();
+                }
+                self.load_entries();
+                self.cursor = 0;
+                self.scroll_offset = 0;
+
+                // Find and highlight the selected entry, then load its preview.
+                if let Some(path) = selected {
+                    if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
+                        self.cursor = idx;
+                        self.update_scroll();
+                        if !self.entries[idx].is_dir {
+                            self.load_preview(&path);
+                        }
+                    }
+                }
             }
 
             AppAction::SearchInput(c) => {
@@ -229,6 +298,118 @@ impl AppState {
 
             AppAction::CancelDelete => {
                 self.delete_target = None;
+                self.mode = AppMode::Browse;
+            }
+
+            AppAction::RenameSelected => {
+                if let Some(path) = &self.selected_path {
+                    if path.is_file() {
+                        self.rename_stem = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.rename_ext = path
+                            .extension()
+                            .map(|e| format!(".{}", e.to_string_lossy()))
+                            .unwrap_or_default();
+                        self.rename_target = Some(path.clone());
+                        self.rename_fresh = true;
+                        self.rename_cancel_focused = false;
+                        self.rename_ext_focused = false;
+                        self.rename_ext_fresh = false;
+                        self.mode = AppMode::Rename;
+                    }
+                }
+            }
+
+            AppAction::RenameInput(c) => {
+                if self.rename_ext_focused {
+                    let was_ext_fresh = self.rename_ext_fresh;
+                    self.rename_ext_fresh = false;
+                    if was_ext_fresh {
+                        // Keep the leading dot, replace extension name.
+                        self.rename_ext = format!(".{}", c);
+                    } else {
+                        self.rename_ext.push(c);
+                    }
+                } else {
+                    let was_fresh = self.rename_fresh;
+                    self.rename_fresh = false;
+                    if was_fresh {
+                        self.rename_stem = c.to_string();
+                    } else {
+                        self.rename_stem.push(c);
+                    }
+                }
+            }
+
+            AppAction::RenameBackspace => {
+                if self.rename_ext_focused {
+                    if self.rename_ext_fresh {
+                        // Exit fresh mode without deleting.
+                        self.rename_ext_fresh = false;
+                    } else if self.rename_ext.len() > 1 {
+                        // More than just the dot — delete last char.
+                        self.rename_ext.pop();
+                    } else {
+                        // Only the dot (or empty) — remove entirely and go back to stem.
+                        self.rename_ext.clear();
+                        self.rename_ext_focused = false;
+                    }
+                } else if self.rename_fresh {
+                    self.rename_fresh = false;
+                } else if !self.rename_stem.is_empty() {
+                    self.rename_stem.pop();
+                }
+            }
+
+            AppAction::RenameRight => {
+                self.rename_fresh = false;
+                if !self.rename_ext_focused && !self.rename_ext.is_empty() {
+                    self.rename_ext_focused = true;
+                    self.rename_ext_fresh = true;
+                }
+            }
+
+            AppAction::RenameLeft => {
+                self.rename_fresh = false;
+                self.rename_ext_focused = false;
+                self.rename_ext_fresh = false;
+            }
+
+            AppAction::RenameTab => {
+                self.rename_cancel_focused = !self.rename_cancel_focused;
+            }
+
+            AppAction::ConfirmRename => {
+                if self.rename_cancel_focused {
+                    // Enter on the Cancel button — same as Esc.
+                    self.rename_target = None;
+                    self.mode = AppMode::Browse;
+                } else if let Some(path) = self.rename_target.take() {
+                    let new_name = format!("{}{}", self.rename_stem.trim(), self.rename_ext);
+                    if !new_name.is_empty() && new_name != "." {
+                        match fsx::rename_file(&path, &new_name) {
+                            Ok(_) => {
+                                self.selected_path = None;
+                                self.preview_content = PreviewContent::Empty;
+                            }
+                            Err(e) => {
+                                self.preview_content = PreviewContent::Error(e.to_string());
+                            }
+                        }
+                        self.load_entries();
+                    }
+                    self.mode = AppMode::Browse;
+                }
+                self.rename_stem.clear();
+                self.rename_ext.clear();
+            }
+
+            AppAction::CancelRename => {
+                self.rename_target = None;
+                self.rename_stem.clear();
+                self.rename_ext.clear();
                 self.mode = AppMode::Browse;
             }
 

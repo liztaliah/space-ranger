@@ -26,6 +26,9 @@ impl AppState {
 
     /// Kick off a background thread to read and render `path`. Returns immediately;
     /// the result arrives via `poll_preview_result` on a future frame.
+    ///
+    /// `pub(in crate::app)` rather than `pub(super)` because it is called from
+    /// both `nav.rs` and `mod.rs`, which are siblings, not parent/child.
     pub(in crate::app) fn load_preview(&mut self, path: &Path) {
         let path_buf = path.to_path_buf();
         self.selected_path = Some(path_buf.clone());

@@ -57,6 +57,80 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(para, modal_rect);
 }
 
+pub fn render_rename(f: &mut Frame, state: &AppState, area: Rect) {
+    let modal_rect = centered_rect(60, 7, area);
+    f.render_widget(Clear, modal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER))
+        .style(Style::default().bg(theme::SURFACE))
+        .title(Span::styled(" Rename ", Style::default().fg(theme::BORDER)));
+
+    let cursor = "\u{2588}";
+    let input_spans: Line = if state.rename_fresh {
+        // Cursor before stem signals the whole name will be replaced on first keypress.
+        Line::from(vec![
+            Span::styled(cursor, Style::default().fg(theme::TEXT)),
+            Span::styled(state.rename_stem.clone(), Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+            Span::styled(state.rename_ext.clone(), Style::default().fg(theme::MUTED)),
+        ])
+    } else if state.rename_ext_focused {
+        // Cursor in the extension. When fresh, cursor sits after the dot so the
+        // extension name is visually selected; first keypress replaces it.
+        let dot = state.rename_ext.get(..1).unwrap_or("");
+        let ext_name = state.rename_ext.get(1..).unwrap_or(&state.rename_ext);
+        if state.rename_ext_fresh {
+            Line::from(vec![
+                Span::styled(state.rename_stem.clone(), Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+                Span::styled(dot, Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(cursor, Style::default().fg(theme::TEXT)),
+                Span::styled(ext_name, Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(state.rename_stem.clone(), Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)),
+                Span::styled(state.rename_ext.clone(), Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(cursor, Style::default().fg(theme::TEXT)),
+            ])
+        }
+    } else {
+        // Normal editing: cursor after stem, ext dimmed.
+        Line::from(vec![
+            Span::styled(state.rename_stem.clone(), Style::default().fg(theme::TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(cursor, Style::default().fg(theme::TEXT)),
+            Span::styled(state.rename_ext.clone(), Style::default().fg(theme::MUTED)),
+        ])
+    };
+
+    let rename_style = if !state.rename_cancel_focused {
+        Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+    let cancel_style = if state.rename_cancel_focused {
+        Style::default().fg(theme::PINK).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::MUTED)
+    };
+
+    let lines = vec![
+        Line::from(""),
+        input_spans,
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [Enter] Rename  ", rename_style),
+            Span::raw("    "),
+            Span::styled("  [Esc] Cancel  ", cancel_style),
+        ]),
+    ];
+
+    let para = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    f.render_widget(para, modal_rect);
+}
+
 /// Returns a `Rect` of the given `width` × `height` centered within `area`.
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let h_pad = area.width.saturating_sub(width) / 2;

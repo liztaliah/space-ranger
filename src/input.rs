@@ -20,12 +20,22 @@ pub enum AppAction {
     // Search
     OpenSearch,
     CloseSearch,
+    SearchConfirm,
     SearchInput(char),
     SearchBackspace,
     // File deletion
     DeleteSelected,
     ConfirmDelete,
     CancelDelete,
+    // File rename
+    RenameSelected,
+    RenameInput(char),
+    RenameBackspace,
+    RenameRight,
+    RenameLeft,
+    RenameTab,
+    ConfirmRename,
+    CancelRename,
     // Preview
     ToggleFocus,
     PreviewScrollDown,
@@ -45,6 +55,7 @@ pub fn map_key(key: KeyEvent, mode: &AppMode, focus: &Focus) -> AppAction {
         },
         AppMode::Search => map_search(key),
         AppMode::DeleteConfirm => map_delete_confirm(key),
+        AppMode::Rename => map_rename(key),
     }
 }
 
@@ -58,6 +69,7 @@ fn map_tree(key: KeyEvent) -> AppAction {
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => AppAction::ParentDir,
         KeyCode::Char('/') => AppAction::OpenSearch,
         KeyCode::Char('d') => AppAction::DeleteSelected,
+        KeyCode::Char('r') => AppAction::RenameSelected,
         KeyCode::Tab => AppAction::ToggleFocus,
         _ => AppAction::NoOp,
     }
@@ -82,9 +94,24 @@ fn map_preview(key: KeyEvent) -> AppAction {
 fn map_search(key: KeyEvent) -> AppAction {
     match key.code {
         KeyCode::Esc => AppAction::CloseSearch,
-        KeyCode::Enter => AppAction::CloseSearch,
+        KeyCode::Enter => AppAction::SearchConfirm,
+        KeyCode::Up | KeyCode::Char('k') => AppAction::CursorUp,
+        KeyCode::Down | KeyCode::Char('j') => AppAction::CursorDown,
         KeyCode::Backspace => AppAction::SearchBackspace,
         KeyCode::Char(c) => AppAction::SearchInput(c),
+        _ => AppAction::NoOp,
+    }
+}
+
+fn map_rename(key: KeyEvent) -> AppAction {
+    match key.code {
+        KeyCode::Enter => AppAction::ConfirmRename,
+        KeyCode::Esc => AppAction::CancelRename,
+        KeyCode::Tab => AppAction::RenameTab,
+        KeyCode::Right => AppAction::RenameRight,
+        KeyCode::Left => AppAction::RenameLeft,
+        KeyCode::Backspace => AppAction::RenameBackspace,
+        KeyCode::Char(c) => AppAction::RenameInput(c),
         _ => AppAction::NoOp,
     }
 }
