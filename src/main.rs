@@ -16,13 +16,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use app::AppState;
+use input::AppAction;
 
 fn main() -> Result<()> {
     let root = match std::env::args().nth(1) {
@@ -87,6 +88,24 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
                 }
                 Event::Resize(w, h) => {
                     state.terminal_size = (w, h);
+                }
+                Event::Mouse(mouse) => {
+                    let action = match mouse.kind {
+                        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                            let tree_width = state.terminal_size.0 * 30 / 100;
+                            let scroll_down = mouse.kind == MouseEventKind::ScrollDown;
+                            if mouse.column >= tree_width {
+                                if scroll_down { AppAction::PreviewScrollDown } else { AppAction::PreviewScrollUp }
+                            } else {
+                                if scroll_down { AppAction::CursorDown } else { AppAction::CursorUp }
+                            }
+                        }
+                        _ => AppAction::NoOp,
+                    };
+                    state.apply(action)?;
+                    if state.should_quit {
+                        break;
+                    }
                 }
                 _ => {}
             }
