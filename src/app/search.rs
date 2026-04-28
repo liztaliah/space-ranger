@@ -15,7 +15,6 @@ impl AppState {
                 path: e.path.clone(),
                 is_dir: e.is_dir,
                 depth: 0,
-                is_expanded: false,
             })
             .collect();
     }

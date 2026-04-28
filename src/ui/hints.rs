@@ -1,5 +1,4 @@
 //! Key binding hints bar — the single row at the bottom of the screen.
-//! Content switches depending on which panel currently has focus.
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -19,8 +18,8 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
             Span::styled(":page  ", Style::default().fg(theme::MUTED)),
             Span::styled("g/G", Style::default().fg(theme::PINK)),
             Span::styled(":top/bot  ", Style::default().fg(theme::MUTED)),
-            Span::styled("Tab/h/Esc", Style::default().fg(theme::PINK)),
-            Span::styled(":back  ", Style::default().fg(theme::MUTED)),
+            Span::styled("Esc/Tab", Style::default().fg(theme::PINK)),
+            Span::styled(":close  ", Style::default().fg(theme::MUTED)),
             Span::styled("q", Style::default().fg(theme::PINK)),
             Span::styled(":quit ", Style::default().fg(theme::MUTED)),
         ])
@@ -28,8 +27,8 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         Line::from(vec![
             Span::styled(" hjkl/arrows", Style::default().fg(theme::BORDER)),
             Span::styled(":navigate  ", Style::default().fg(theme::MUTED)),
-            Span::styled("Tab", Style::default().fg(theme::BORDER)),
-            Span::styled(":read  ", Style::default().fg(theme::MUTED)),
+            Span::styled("Enter", Style::default().fg(theme::BORDER)),
+            Span::styled(":open  ", Style::default().fg(theme::MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER)),
             Span::styled(":search  ", Style::default().fg(theme::MUTED)),
             Span::styled("d", Style::default().fg(theme::BORDER)),

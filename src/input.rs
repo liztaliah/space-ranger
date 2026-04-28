@@ -16,6 +16,7 @@ pub enum AppAction {
     CursorUp,
     CursorDown,
     EnterOrExpand,
+    FocusRight,
     ParentDir,
     // Search
     OpenSearch,
@@ -65,7 +66,8 @@ fn map_tree(key: KeyEvent) -> AppAction {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => AppAction::Quit,
         KeyCode::Char('k') | KeyCode::Up => AppAction::CursorUp,
         KeyCode::Char('j') | KeyCode::Down => AppAction::CursorDown,
-        KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => AppAction::EnterOrExpand,
+        KeyCode::Char('l') | KeyCode::Right => AppAction::FocusRight,
+        KeyCode::Enter => AppAction::EnterOrExpand,
         KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => AppAction::ParentDir,
         KeyCode::Char('/') => AppAction::OpenSearch,
         KeyCode::Char('d') => AppAction::DeleteSelected,
@@ -156,7 +158,7 @@ mod tests {
     fn browse_vim_nav() {
         assert_eq!(map_key(key(KeyCode::Char('j')), &AppMode::Browse, &Focus::Tree), AppAction::CursorDown);
         assert_eq!(map_key(key(KeyCode::Char('k')), &AppMode::Browse, &Focus::Tree), AppAction::CursorUp);
-        assert_eq!(map_key(key(KeyCode::Char('l')), &AppMode::Browse, &Focus::Tree), AppAction::EnterOrExpand);
+        assert_eq!(map_key(key(KeyCode::Char('l')), &AppMode::Browse, &Focus::Tree), AppAction::FocusRight);
         assert_eq!(map_key(key(KeyCode::Char('h')), &AppMode::Browse, &Focus::Tree), AppAction::ParentDir);
     }
 

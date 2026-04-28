@@ -1,8 +1,4 @@
 //! Top-level render function and layout.
-//!
-//! ratatui is immediate-mode: this function redraws the entire terminal from
-//! scratch every frame. There is no diffing or retained widget state — each
-//! call to `render` produces a complete description of what to display.
 
 mod hints;
 pub mod modal;
@@ -26,22 +22,33 @@ pub fn render(f: &mut Frame, state: &AppState) {
     ])
     .areas(area);
 
-    // Split main area 30% tree / 70% preview.
-    let [tree_area, preview_area] = Layout::horizontal([
-        Constraint::Percentage(30),
-        Constraint::Percentage(70),
-    ])
-    .areas(main_area);
-
-    tree::render(f, state, tree_area);
-    preview::render(f, state, preview_area);
+    if state.preview_open {
+        // Two-column layout when a file is open: current dir | file preview.
+        let [tree_area, preview_area] = Layout::horizontal([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(2, 3),
+        ])
+        .areas(main_area);
+        tree::render(f, state, tree_area);
+        preview::render(f, state, preview_area);
+    } else {
+        // Three-column layout browsing: grandparent | parent | current dir.
+        let [grandparent_area, parent_area, tree_area] = Layout::horizontal([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ])
+        .areas(main_area);
+        tree::render_grandparent(f, state, grandparent_area);
+        tree::render_parent(f, state, parent_area);
+        tree::render(f, state, tree_area);
+    }
 
     match state.mode {
         AppMode::Search => search::render(f, state, bottom_area),
         AppMode::Browse | AppMode::DeleteConfirm | AppMode::Rename => hints::render(f, state, bottom_area),
     }
 
-    // Modals are drawn last so they paint over both panels.
     if state.mode == AppMode::DeleteConfirm {
         modal::render(f, state, area);
     }

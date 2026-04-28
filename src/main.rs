@@ -67,7 +67,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
     let mut state = AppState::new(root)?;
 
     loop {
-        state.poll_preview(Duration::from_millis(150));
         state.poll_preview_result();
         // Check whether the background search-cache thread has finished.
         // This is non-blocking (try_recv) so it never stalls the render loop.
@@ -92,9 +91,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, root: PathBuf) -> 
                 Event::Mouse(mouse) => {
                     let action = match mouse.kind {
                         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
-                            let tree_width = state.terminal_size.0 * 30 / 100;
                             let scroll_down = mouse.kind == MouseEventKind::ScrollDown;
-                            if mouse.column >= tree_width {
+                            // Preview starts at 25% of width when open (25% tree + 75% preview).
+                            let in_preview = state.preview_open
+                                && mouse.column >= state.terminal_size.0 * 25 / 100;
+                            if in_preview {
                                 if scroll_down { AppAction::PreviewScrollDown } else { AppAction::PreviewScrollUp }
                             } else {
                                 if scroll_down { AppAction::CursorDown } else { AppAction::CursorUp }

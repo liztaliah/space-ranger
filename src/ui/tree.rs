@@ -1,12 +1,7 @@
-//! Left panel: directory tree rendered as a ratatui List.
-//!
-//! ratatui has no built-in tree widget, so the tree is stored as a flat
-//! `Vec<DirEntry>` in AppState with a `depth` field for indentation.
-//! Expanding/collapsing a directory splices its children in or out of that
-//! vec — see `app::expand_dir` and `app::collapse_dir`.
+//! Directory columns: current directory and parent directory panels.
 
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
@@ -14,23 +9,25 @@ use ratatui::Frame;
 use crate::app::{AppState, Focus};
 use crate::ui::theme;
 
-const ICON_DIR_CLOSED: &str = " ";
-const ICON_DIR_OPEN: &str = " ";
+const ICON_DIR: &str = " ";
 const ICON_FILE: &str = " ";
 
+/// Render the current directory listing (the active/middle column).
 pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
     let focused = state.focus == Focus::Tree;
     let title = format!(" {} ", state.root.display());
-    // Dim the border when the preview panel has focus, so it's immediately
-    // clear which panel is receiving keyboard input.
-    let border_color = if focused { theme::BORDER } else { theme::MUTED };
+    // Col 2 is blue when it has column focus, or when the preview panel has focus.
+    let border_color = if focused && state.focused_col == 2 || state.focus == Focus::Preview {
+        theme::BORDER
+    } else {
+        theme::MUTED
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(theme::BG))
         .title(Span::styled(title, Style::default().fg(theme::TEXT)));
 
-    // Show a loading indicator while the background search walk is in progress.
     if state.search_loading {
         let loading = Paragraph::new("Scanning…")
             .block(block)
@@ -46,16 +43,10 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .entries
         .iter()
         .map(|entry| {
-            let indent = "  ".repeat(entry.depth);
-            let icon = if entry.is_dir {
-                if entry.is_expanded { ICON_DIR_OPEN } else { ICON_DIR_CLOSED }
-            } else {
-                ICON_FILE
-            };
-            let prefix = format!("{}{}", indent, icon);
+            let icon = if entry.is_dir { ICON_DIR } else { ICON_FILE };
+            let prefix = format!("{}{}", "  ".repeat(entry.depth), icon);
 
             let line = if !query.is_empty() {
-                // Highlight the matching substring in green.
                 let name_lower = entry.name.to_lowercase();
                 if let Some(pos) = name_lower.find(&query) {
                     let end = pos + query.len();
@@ -69,7 +60,6 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
                         Span::styled(after.to_owned(), Style::default().fg(theme::TEXT)),
                     ])
                 } else {
-                    // Non-matching entry — dim it so matches stand out.
                     Line::from(vec![
                         Span::styled(prefix, Style::default().fg(theme::MUTED)),
                         Span::styled(entry.name.clone(), Style::default().fg(theme::MUTED)),
@@ -96,15 +86,85 @@ pub fn render(f: &mut Frame, state: &AppState, area: Rect) {
         .highlight_style(
             Style::default()
                 .bg(theme::PINK)
-                .fg(Color::White)
+                .fg(ratatui::style::Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
 
-    // `with_offset` sets the first visible row; `select` marks the cursor row.
-    // Both are needed: offset controls scrolling, select controls the highlight.
     let mut list_state = ListState::default().with_offset(state.scroll_offset);
     list_state.select(if state.entries.is_empty() { None } else { Some(state.cursor) });
+
+    f.render_stateful_widget(list, area, &mut list_state);
+}
+
+/// Render the parent directory listing (middle-left column).
+pub fn render_parent(f: &mut Frame, state: &AppState, area: Rect) {
+    let title = state.root
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| format!(" {} ", n.to_string_lossy()))
+        .unwrap_or_else(|| " / ".to_owned());
+    let active = state.focus == Focus::Tree && state.focused_col == 1;
+    render_ancestor_column(f, &state.parent_entries, state.parent_cursor, &title, active, area);
+}
+
+/// Render the grandparent directory listing (far-left column).
+pub fn render_grandparent(f: &mut Frame, state: &AppState, area: Rect) {
+    let title = state.root
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.file_name())
+        .map(|n| format!(" {} ", n.to_string_lossy()))
+        .unwrap_or_else(|| " / ".to_owned());
+    let active = state.focus == Focus::Tree && state.focused_col == 0;
+    render_ancestor_column(f, &state.grandparent_entries, state.grandparent_cursor, &title, active, area);
+}
+
+/// Shared renderer for ancestor columns (parent, grandparent).
+/// `active` controls whether the border is blue (focused) or muted.
+fn render_ancestor_column(f: &mut Frame, entries: &[crate::app::DirEntry], cursor: usize, title: &str, active: bool, area: Rect) {
+    let border_color = if active { theme::BORDER } else { theme::MUTED };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(theme::BG))
+        .title(Span::styled(title.to_owned(), Style::default().fg(theme::MUTED)));
+
+    if entries.is_empty() {
+        f.render_widget(block, area);
+        return;
+    }
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .map(|entry| {
+            let icon = if entry.is_dir { ICON_DIR } else { ICON_FILE };
+            let name_style = if entry.is_dir {
+                Style::default().fg(theme::MUTED).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::MUTED)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {}", icon), Style::default().fg(theme::MUTED)),
+                Span::styled(entry.name.clone(), name_style),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(theme::BORDER)
+                .fg(ratatui::style::Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("> ");
+
+    let visible = area.height.saturating_sub(2) as usize;
+    let offset = cursor.saturating_sub(visible / 2);
+    let mut list_state = ListState::default().with_offset(offset);
+    list_state.select(Some(cursor));
 
     f.render_stateful_widget(list, area, &mut list_state);
 }
